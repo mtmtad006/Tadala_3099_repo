@@ -75,7 +75,7 @@ DMA_HandleTypeDef hdma_usart1_tx;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
- void MX_NVIC_Init(void); 
+static void MX_NVIC_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -92,9 +92,12 @@ float SW1;
 float SW2;
 
 int8_t bigBuffer[3+5+(18*5)+1+3]; // 5 bytes for mouse control + headers and terminators
+uint8_t headerBuffer[3];  // Buffer to receive header bytes
 uint8_t header[3];
 uint8_t terminator[3];
 int8_t buffer[5];
+uint8_t headerIndex = 0;  // Index for tracking header reception progress
+bool expecting_packet = false;  // Flag to track if we're expecting a full packet
 
 bool LED0 = 0;
 bool LED1 = 0;
@@ -220,31 +223,35 @@ void sendToSimulink(){
 }
 
 void recievedFromSimulink(){
-    memcpy(header, bigBuffer, 3);          // Copy first 3 bytes into header
-    memcpy(terminator, bigBuffer + (sizeof(bigBuffer) - 3), 3);  // Copy last 3 bytes into terminator
+    // Data has been received via DMA into bigBuffer
+    // We only reach here if the header was already verified
+    expecting_packet = false; // Reset flag as packet has been received
+    
+    // Extract and verify terminator bytes
+    memcpy(terminator, bigBuffer + (sizeof(bigBuffer) - 3), 3);
+    
+    if (terminator[0] == expectedTerminator[0] & terminator[1] == expectedTerminator[1] && terminator[2] == expectedTerminator[2]){
+        LED[0] = bigBuffer[3];
+        LED[1] = bigBuffer[4];
+        LED[2] = bigBuffer[5];
 
-    if (header[0] == expectedHeader[0] & header[1] == expectedHeader[1] & header[2] == expectedHeader[2] ) {
-        if (terminator[0] == expectedTerminator[0] & terminator[1] == expectedTerminator[1] && terminator[2] == expectedTerminator[2]){
-          LED[0] = bigBuffer[3];
-          LED[1] = bigBuffer[4];
-          LED[2] = bigBuffer[5];
+        MOTOR_LS = bigBuffer[6];
+        MOTOR_RS = bigBuffer[7];
 
-          MOTOR_LS = bigBuffer[6];
-          MOTOR_RS = bigBuffer[7];
-
-          for (int i = 0; i < 18; i++) {
+        for (int i = 0; i < 18; i++) {
             oled_string1[i] = bigBuffer[8 + i];
             oled_string2[i] = bigBuffer[26 + i];
             oled_string3[i] = bigBuffer[44 + i];
             oled_string4[i] = bigBuffer[62 + i];
             oled_string5[i] = bigBuffer[80 + i];
-          }
-
-          STATE = bigBuffer[98];
-
         }
-    }
 
+        STATE = bigBuffer[98];
+    }
+    
+    // Restart header reception for next packet
+    headerIndex = 0;
+    HAL_UART_Receive_IT(&huart1, &headerBuffer[headerIndex], 1);
 }
 
 uint8_t I2C_Scan(I2C_HandleTypeDef *hi2c, uint8_t *foundAddresses, uint8_t maxAddresses) {
@@ -582,7 +589,7 @@ void SystemClock_Config(void)
   * @brief NVIC Configuration.
   * @retval None
   */
- void MX_NVIC_Init(void) 
+static void MX_NVIC_Init(void)
 {
   /* FLASH_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(FLASH_IRQn, 0, 0);
@@ -736,7 +743,7 @@ void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x00F01A72;
+  hi2c1.Init.Timing = 0x00801A80;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
@@ -1363,5 +1370,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
-/*SimulinkGeneratedCode*/
